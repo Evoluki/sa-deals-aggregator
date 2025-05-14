@@ -4,3 +4,4 @@ lxml
 jinja2
 pandas
 sendgrid
+certifi
