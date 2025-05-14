@@ -1,5 +1,3 @@
-# scraper_takealot_sqlite.py
-
 import re
 import sqlite3
 from datetime import date
@@ -32,31 +30,36 @@ def fetch_takealot_deals():
     soup = BeautifulSoup(html, "lxml")
     deals = []
     for art in soup.select("article[data-ref='product-card']"):
-        link_tag = art.select_one("a[class^='product-card-module_link-underlay']")
-        href = link_tag.get("href") if link_tag else ""
+        href = art.select_one("a[class^='product-card-module_link-underlay']").get("href", "")
         full_url = urljoin(BASE_URL, href)
 
-        title_tag = art.select_one("h4[id^='product-card-heading']")
-        title = title_tag.get_text(strip=True) if title_tag else ""
+        title = art.select_one("h4[id^='product-card-heading']").get_text(strip=True) or ""
 
-        curr = art.select_one("li[data-ref='price'] span.currency")
-        price = curr.get_text(strip=True) if curr else ""
+        price = art.select_one("li[data-ref='price'] span.currency")
+        price_text = price.get_text(strip=True) if price else ""
 
-        old = art.select_one("li[data-ref='list-price'] span.currency")
-        orig_price = old.get_text(strip=True) if old else None
+        # Parse numeric price
+        price_value = None
+        if price_text:
+            m = re.search(r"\d[\d,]*", price_text.replace(" ", ""))
+            if m:
+                price_value = int(m.group(0).replace(",", ""))
+
+        orig = art.select_one("li[data-ref='list-price'] span.currency")
+        orig_price = orig.get_text(strip=True) if orig else None
 
         img = art.select_one("img[data-ref='product-image']")
         image = img.get("src") if img else None
 
-        # extract the PLID from the URL (digits after '/PLID')
-        m = re.search(r"/PLID(\d+)", full_url)
-        product_id = m.group(1) if m else None
+        m2 = re.search(r"/PLID(\d+)", full_url)
+        product_id = m2.group(1) if m2 else None
 
         deals.append({
             "product_id": product_id,
             "title": title,
             "url": full_url,
-            "price": price,
+            "price": price_text,
+            "price_value": price_value,
             "orig_price": orig_price,
             "image": image,
         })
@@ -65,6 +68,7 @@ def fetch_takealot_deals():
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    # Create table if missing
     cur.execute("""
     CREATE TABLE IF NOT EXISTS deals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,12 +76,19 @@ def init_db():
         title TEXT,
         url TEXT,
         price TEXT,
+        price_value INTEGER,
         orig_price TEXT,
         image TEXT,
         scraped_date TEXT,
         UNIQUE(product_id, scraped_date)
     );
     """)
+    # Migrate: add price_value if absent
+    cur.execute("PRAGMA table_info(deals);")
+    cols = [row[1] for row in cur.fetchall()]
+    if "price_value" not in cols:
+        print("[INFO] Migrating DB: adding price_value column")
+        cur.execute("ALTER TABLE deals ADD COLUMN price_value INTEGER;")
     conn.commit()
     return conn
 
@@ -91,13 +102,14 @@ def save_deals(deals, conn):
         try:
             cur.execute("""
                 INSERT OR IGNORE INTO deals 
-                (product_id, title, url, price, orig_price, image, scraped_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (product_id, title, url, price, price_value, orig_price, image, scraped_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 d["product_id"],
                 d["title"],
                 d["url"],
                 d["price"],
+                d["price_value"],
                 d["orig_price"],
                 d["image"],
                 today
