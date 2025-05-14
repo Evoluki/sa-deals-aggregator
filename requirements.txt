@@ -3,3 +3,4 @@ beautifulsoup4
 lxml
 jinja2
 pandas
+sendgrid
