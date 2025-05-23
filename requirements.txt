@@ -1,0 +1,8 @@
+playwright
+beautifulsoup4
+lxml
+jinja2
+pandas
+sendgrid
+certifi
+python-dotenv

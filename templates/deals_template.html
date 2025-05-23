@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Today's Top Deals</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 1rem; }
+    h1 { text-align: center; }
+    .deal { border-bottom: 1px solid #ddd; padding: 0.5rem 0; display: flex; }
+    .deal img { width: 100px; height: auto; margin-right: 1rem; }
+    .info { flex: 1; }
+    .price { font-weight: bold; color: green; }
+    .orig { text-decoration: line-through; color: #888; margin-left: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Top Deals for {{ date }}</h1>
+  {% if deals %}
+    {% for d in deals %}
+      <div class="deal">
+        {% if d.image %}
+          <img src="{{ d.image }}" alt="{{ d.title }}" />
+        {% endif %}
+        <div class="info">
+          <a href="{{ d.url }}"><h2>{{ d.title }}</h2></a>
+          <div>
+            <span class="price">{{ d.price }}</span>
+            {% if d.orig_price %}
+              <span class="orig">{{ d.orig_price }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>No deals found for today.</p>
+  {% endif %}
+</body>
+</html>
