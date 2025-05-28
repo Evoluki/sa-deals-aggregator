@@ -37,11 +37,10 @@ jobs:
           source venv/bin/activate
           python scraper_takealot_sqlite.py
 
-      # Uncomment once you have your Loot API scraper ready:
-      #- name: Run Loot scraper
-      #  run: |
-      #    source venv/bin/activate
-      #    python scraper_loot_api.py
+      - name: Run Loot scraper
+        run: |
+          source venv/bin/activate
+          python scraper_loot_dom.py
 
       - name: Render HTML
         run: |
