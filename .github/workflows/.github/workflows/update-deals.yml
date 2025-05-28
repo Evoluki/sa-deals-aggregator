@@ -16,7 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Need full history to commit & push
           fetch-depth: 0
           persist-credentials: true
 
@@ -31,6 +30,11 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          source venv/bin/activate
+          playwright install chromium
 
       - name: Run Takealot scraper
         run: |
@@ -52,7 +56,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
           git add index.html
-          git commit -m "Automated daily update: $(date -u +"%Y-%m-%d")" || echo "No changes to commit"
+          git commit -m "Automated daily update: $(date -u +'%Y-%m-%d')" || echo "No changes to commit"
+          git pull --rebase origin main
           git push origin main
 
       - name: Send email alerts
