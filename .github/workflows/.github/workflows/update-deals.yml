@@ -1,0 +1,79 @@
+name: Daily Deals Update
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Runs at 04:00 UTC every day (06:00 SAST)
+    - cron: '0 4 * * *'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Create venv & install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          source venv/bin/activate
+          playwright install chromium
+
+      - name: Run Takealot scraper
+        run: |
+          source venv/bin/activate
+          python scraper_takealot_sqlite.py
+
+      - name: Run Loot scraper
+        run: |
+          source venv/bin/activate
+          python scraper_loot_dom.py
+
+      - name: Render HTML (and debug count)
+        run: |
+          source venv/bin/activate
+          python render_deals.py
+
+      - name: Commit & push only if index.html changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+
+          # Stage only index.html (never deals.db)
+          git add index.html
+
+          # If no changes to commit, skip push
+          if git diff --cached --quiet; then
+            echo "No changes to commit → skipping push."
+            exit 0
+          fi
+
+          # Otherwise commit, rebase, and push
+          git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Send email alerts
+        if: always()
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        run: |
+          source venv/bin/activate
+          python email_deals.py
