@@ -11,10 +11,11 @@ RETAILER = "takealot"
 def fetch_takealot_deals_dom():
     """Fetch current Takealot deals by parsing the All Deals page DOM."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=60000)
-        page.wait_for_load_state('networkidle')
+        # Wait a few seconds for content to load instead of relying on networkidle
+        page.wait_for_timeout(5000)
         # Scroll to load lazy content
         for _ in range(5):
             page.mouse.wheel(0, 1000)
