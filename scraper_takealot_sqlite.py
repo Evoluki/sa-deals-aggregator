@@ -14,8 +14,12 @@ def fetch_takealot_deals_dom():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=60000)
-        # Wait a few seconds for content to load instead of relying on networkidle
-        page.wait_for_timeout(5000)
+        # Wait for at least one product-card to appear
+        try:
+            page.wait_for_selector("article[data-ref='product-card']", timeout=15000)
+        except:
+            # Fallback to fixed delay if selector does not appear
+            page.wait_for_timeout(5000)
         # Scroll to load lazy content
         for _ in range(5):
             page.mouse.wheel(0, 1000)
@@ -25,14 +29,14 @@ def fetch_takealot_deals_dom():
 
     soup = BeautifulSoup(html, 'lxml')
     deals = []
-    # Find all product-card articles
-    for card in soup.find_all('article', class_=lambda x: x and 'product-card' in x):
+    # Each product-card
+    for card in soup.select("article[data-ref='product-card']"):
         # Title
-        title_el = card.select_one("h4[class*='product-title']")
+        title_el = card.select_one("h4[id^='product-card-heading']")
         title = title_el.get_text(strip=True) if title_el else None
 
         # Link
-        link_el = card.select_one("a.product-card-module_link-underlay_3sfaA, a[aria-label='Go to product details']")
+        link_el = card.select_one("a.product-card-module_link-underlay_3sfaA")
         href = link_el['href'] if link_el and link_el.has_attr('href') else None
         url = f"https://www.takealot.com{href}" if href and href.startswith('/') else href
 
@@ -40,10 +44,10 @@ def fetch_takealot_deals_dom():
         img_el = card.select_one("img[data-ref='product-image']")
         image = img_el['src'] if img_el and img_el.has_attr('src') else None
 
-        # Price
+        # Price (deal price)
         price_value = None
         price = None
-        price_el = card.select_one("li[data-ref='price'] .currency")
+        price_el = card.select_one("li[data-ref='price'] span.currency")
         if price_el:
             price_text = price_el.get_text().replace('R', '').replace(' ', '')
             try:
@@ -52,8 +56,8 @@ def fetch_takealot_deals_dom():
             except ValueError:
                 pass
 
-        # Original price
-        orig_el = card.select_one("li[data-ref='list-price'] .currency")
+        # Original list price
+        orig_el = card.select_one("li[data-ref='list-price'] span.currency")
         orig_price = orig_el.get_text(strip=True) if orig_el else None
 
         # Product ID
