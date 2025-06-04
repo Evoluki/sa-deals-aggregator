@@ -1,84 +1,80 @@
-# scraper_takealot_sqlite.py
-
-import re
 import sqlite3
+import re
 from datetime import date
-from playwright.sync_api import sync_playwright
-from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
-BASE_URL  = "https://www.takealot.com"
-DEALS_URL = BASE_URL + "/all-deals?sort=popularity"
-DB_PATH   = "deals.db"
-RETAILER  = "takealot"
+DB_PATH = "deals.db"
+RETAILER = "takealot"
 
-def categorize(title: str) -> str:
-    t = title.lower()
-    # Beauty keywords
-    beauty = ["foundation", "eyeliner", "lip", "mascara", "skincare", "cream", "serum"]
-    # Electronics keywords
-    electronics = ["tv", "monitor", "laptop", "iphone", "phone", "charger", "adapter", "tablet", "gaming", "headphone"]
-    if any(k in t for k in beauty):
-        return "Beauty"
-    if any(k in t for k in electronics):
-        return "Electronics"
-    return "Other"
 
-def fetch_takealot_deals():
+def fetch_takealot_deals_dom():
+    """Fetch current Takealot deals by parsing the All Deals page DOM."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(DEALS_URL, timeout=60000)
-        page.wait_for_timeout(7000)
-        for _ in range(15):
+        page.goto("https://www.takealot.com/all-deals", timeout=60000)
+        page.wait_for_load_state('networkidle')
+        # Scroll to load lazy content
+        for _ in range(5):
             page.mouse.wheel(0, 1000)
             page.wait_for_timeout(500)
         html = page.content()
         browser.close()
 
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, 'lxml')
     deals = []
-    for art in soup.select("article[data-ref='product-card']"):
-        link_tag = art.select_one("a.product-card-module_link-underlay_3sfaA")
-        href = link_tag.get("href", "") if link_tag else ""
-        full_url = urljoin(BASE_URL, href)
+    # Find all product-card articles
+    for card in soup.find_all('article', class_=lambda x: x and 'product-card' in x):
+        # Title
+        title_el = card.select_one("h4[class*='product-title']")
+        title = title_el.get_text(strip=True) if title_el else None
 
-        title_tag = art.select_one("h4[id^='product-card-heading']")
-        title = title_tag.get_text(strip=True) if title_tag else ""
+        # Link
+        link_el = card.select_one("a.product-card-module_link-underlay_3sfaA, a[aria-label='Go to product details']")
+        href = link_el['href'] if link_el and link_el.has_attr('href') else None
+        url = f"https://www.takealot.com{href}" if href and href.startswith('/') else href
 
-        curr_li = art.select_one("li[data-ref='price'] span.currency")
-        price_text = curr_li.get_text(strip=True) if curr_li else ""
+        # Image
+        img_el = card.select_one("img[data-ref='product-image']")
+        image = img_el['src'] if img_el and img_el.has_attr('src') else None
+
+        # Price
         price_value = None
-        if price_text:
-            m = re.search(r"\d[\d,]*", price_text.replace(" ", ""))
-            if m:
-                price_value = int(m.group(0).replace(",", ""))
+        price = None
+        price_el = card.select_one("li[data-ref='price'] .currency")
+        if price_el:
+            price_text = price_el.get_text().replace('R', '').replace(' ', '')
+            try:
+                price_value = int(price_text)
+                price = f"R {price_value:,}".replace(",", " ")
+            except ValueError:
+                pass
 
-        old_li = art.select_one("li[data-ref='list-price'] span.currency")
-        orig_price = old_li.get_text(strip=True) if old_li else None
+        # Original price
+        orig_el = card.select_one("li[data-ref='list-price'] .currency")
+        orig_price = orig_el.get_text(strip=True) if orig_el else None
 
-        img = art.select_one("img[data-ref='product-image']")
-        image = img.get("src") if img else None
+        # Product ID
+        pid = card.get('data-product-id') or (href.split('/')[-1] if href else (title or '')[:50])
 
-        m2 = re.search(r"/PLID(\d+)", full_url)
-        product_id = m2.group(1) if m2 else None
-
-        deals.append({
-            "product_id": product_id,
-            "title": title,
-            "url": full_url,
-            "price": price_text,
-            "price_value": price_value,
-            "orig_price": orig_price,
-            "category": categorize(title),
-            "image": image,
-        })
+        if title and price_value is not None:
+            deals.append({
+                'product_id': pid,
+                'title': title,
+                'url': url,
+                'price': price,
+                'price_value': price_value,
+                'orig_price': orig_price,
+                'category': 'Other',
+                'image': image
+            })
     return deals
+
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
+    conn.execute("""
     CREATE TABLE IF NOT EXISTS deals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       retailer TEXT,
@@ -94,38 +90,29 @@ def init_db():
       UNIQUE(retailer, product_id, scraped_date)
     );
     """)
-    cur.execute("PRAGMA table_info(deals);")
-    cols = [row[1] for row in cur.fetchall()]
-    if "price_value" not in cols:
-        print("[INFO] Migrating DB: adding price_value column")
-        cur.execute("ALTER TABLE deals ADD COLUMN price_value INTEGER;")
-    if "category" not in cols:
-        print("[INFO] Migrating DB: adding category column")
-        cur.execute("ALTER TABLE deals ADD COLUMN category TEXT;")
     conn.commit()
     return conn
 
-def save_deals(deals, conn):
+
+def save_takealot(deals, conn):
     today = date.today().isoformat()
     cur = conn.cursor()
     inserted = 0
     for d in deals:
-        if not d["product_id"]:
-            continue
         cur.execute("""
           INSERT OR IGNORE INTO deals
-            (retailer, product_id, title, url, price, price_value, orig_price, category, image, scraped_date)
-          VALUES (?,    ?,          ?,     ?,   ?,      ?,           ?,         ?,        ?,      ?)
+            (retailer,product_id,title,url,price,price_value,orig_price,category,image,scraped_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (
             RETAILER,
-            d["product_id"],
-            d["title"],
-            d["url"],
-            d["price"],
-            d["price_value"],
-            d["orig_price"],
-            d["category"],
-            d["image"],
+            d['product_id'],
+            d['title'],
+            d['url'],
+            d['price'],
+            d['price_value'],
+            d['orig_price'],
+            d['category'],
+            d['image'],
             today
         ))
         if cur.rowcount:
@@ -133,16 +120,14 @@ def save_deals(deals, conn):
     conn.commit()
     return inserted
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     print("[INFO] Initializing database…")
     conn = init_db()
-
-    print("[INFO] Fetching deals…")
-    deals = fetch_takealot_deals()
-    print(f"[INFO] Retrieved {len(deals)} deals from {RETAILER}")
-
+    print("[INFO] Fetching deals from Takealot via DOM…")
+    deals = fetch_takealot_deals_dom()
+    print(f"[INFO] Retrieved {len(deals)} deals from Takealot")
     print("[INFO] Saving to database…")
-    new_count = save_deals(deals, conn)
-    print(f"[INFO] Inserted {new_count} new deals (duplicates ignored)")
-
+    count = save_takealot(deals, conn)
+    print(f"[INFO] Inserted {count} new deals (duplicates ignored)")
     conn.close()
