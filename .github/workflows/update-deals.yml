@@ -12,64 +12,68 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-
+      # 1) Check out the repo at full depth so we can push back
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
+      # 2) Set up Python 3.x
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
+      # 3) Create & activate a virtualenv, then install all requirements (including Playwright)
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright browsers
-        run: |
-          source venv/bin/activate
+          # Now install the browser binaries for Playwright (needed by scraper_loot_dom.py)
           playwright install chromium
 
+      # 4) Run the Takealot scraper
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py
 
+      # 5) Run the Loot scraper
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
+      # 6) Render the combined deals page (with a debug print)
       - name: Render HTML (and debug count)
         run: |
           source venv/bin/activate
           python render_deals.py
 
+      # 7) Commit & push only if index.html actually changed 
       - name: Commit & push only if index.html changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
 
-          # Stage only index.html (never deals.db)
+          # Stage only index.html (NEVER deals.db)
           git add index.html
 
-          # If no changes to commit, skip push
+          # If index.html didn't change, skip push
           if git diff --cached --quiet; then
             echo "No changes to commit → skipping push."
             exit 0
           fi
 
-          # Otherwise commit, rebase, and push
+          # Otherwise, commit & rebase on latest main, then push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
 
+      # 8) Finally, send out the email (always run, even if nothing changed)
       - name: Send email alerts
         if: always()
         env:
