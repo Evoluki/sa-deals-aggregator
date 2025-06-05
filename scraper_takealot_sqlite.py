@@ -14,15 +14,16 @@ def fetch_takealot_deals_dom():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=60000)
-        # Wait for at least one product-card to appear, or fallback after 5s
-        try:
-            page.wait_for_selector("article[data-ref='product-card']", timeout=15000)
-        except:
-            page.wait_for_timeout(5000)
 
-        # Scroll a few times to load lazy content
-        for _ in range(5):
-            page.mouse.wheel(0, 1000)
+        # Wait for at least one deal wrapper to appear, otherwise fallback after 8s
+        try:
+            page.wait_for_selector("div.search-product.grid.deals", timeout=20000)
+        except:
+            page.wait_for_timeout(8000)
+
+        # Scroll repeatedly to load lazy content
+        for _ in range(10):
+            page.mouse.wheel(0, 2000)
             page.wait_for_timeout(500)
 
         html = page.content()
@@ -30,8 +31,14 @@ def fetch_takealot_deals_dom():
 
     soup = BeautifulSoup(html, "lxml")
     deals = []
-    # Each product-card
-    for card in soup.select("article[data-ref='product-card']"):
+
+    # Each deal is wrapped in <div class="search-product grid deals" id="...">
+    for wrapper in soup.select("div.search-product.grid.deals"):
+        # Inside that wrapper, find the <article data-ref="product-card">
+        card = wrapper.select_one("article[data-ref='product-card']")
+        if not card:
+            continue
+
         # Title
         title_el = card.select_one("h4[id^='product-card-heading']")
         title = title_el.get_text(strip=True) if title_el else None
@@ -45,7 +52,7 @@ def fetch_takealot_deals_dom():
         img_el = card.select_one("img[data-ref='product-image']")
         image = img_el["src"] if img_el and img_el.has_attr("src") else None
 
-        # Price (deal price)
+        # Current price
         price_value = None
         price = None
         price_el = card.select_one("li[data-ref='price'] span.currency")
