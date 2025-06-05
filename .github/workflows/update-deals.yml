@@ -12,14 +12,14 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      # 1) Checkout full history (needed so we can push back)
+      # 1) Checkout full history so we can push back
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Setup Python 3.x
+      # 2) Set up Python 3.x
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -46,32 +46,32 @@ jobs:
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) Render the combined deals page (with a debug count)
+      # 6) Render the combined deals page (and print count)
       - name: Render HTML (and debug count)
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 7) Commit & push index.html ONLY (reset hard to avoid “unstaged changes”)
+      # 7) Commit & push index.html ONLY (reset to avoid unstaged changes)
       - name: Commit & push only if index.html changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Reset to remote main so any local artifacts (e.g. deals.db) won't block us
+          # Hard reset to remote main to clear any local artifacts
           git fetch origin
           git reset --hard origin/main
 
           # Stage index.html (never deals.db)
           git add index.html
 
-          # If index.html content is identical to HEAD, skip the push
+          # If index.html didn’t change, skip push
           if git diff --cached --quiet; then
             echo "No changes to index.html → skipping push."
             exit 0
           fi
 
-          # Otherwise commit and push
+          # Otherwise, commit & push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push origin main
 
