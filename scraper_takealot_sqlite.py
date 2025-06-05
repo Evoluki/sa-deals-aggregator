@@ -14,20 +14,21 @@ def fetch_takealot_deals_dom():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=60000)
-        # Wait for at least one product-card to appear
+        # Wait for at least one product-card to appear, or fallback after 5s
         try:
             page.wait_for_selector("article[data-ref='product-card']", timeout=15000)
         except:
-            # Fallback to fixed delay if selector does not appear
             page.wait_for_timeout(5000)
-        # Scroll to load lazy content
+
+        # Scroll a few times to load lazy content
         for _ in range(5):
             page.mouse.wheel(0, 1000)
             page.wait_for_timeout(500)
+
         html = page.content()
         browser.close()
 
-    soup = BeautifulSoup(html, 'lxml')
+    soup = BeautifulSoup(html, "lxml")
     deals = []
     # Each product-card
     for card in soup.select("article[data-ref='product-card']"):
@@ -37,19 +38,19 @@ def fetch_takealot_deals_dom():
 
         # Link
         link_el = card.select_one("a.product-card-module_link-underlay_3sfaA")
-        href = link_el['href'] if link_el and link_el.has_attr('href') else None
-        url = f"https://www.takealot.com{href}" if href and href.startswith('/') else href
+        href = link_el["href"] if link_el and link_el.has_attr("href") else None
+        url = f"https://www.takealot.com{href}" if href and href.startswith("/") else href
 
         # Image
         img_el = card.select_one("img[data-ref='product-image']")
-        image = img_el['src'] if img_el and img_el.has_attr('src') else None
+        image = img_el["src"] if img_el and img_el.has_attr("src") else None
 
         # Price (deal price)
         price_value = None
         price = None
         price_el = card.select_one("li[data-ref='price'] span.currency")
         if price_el:
-            price_text = price_el.get_text().replace('R', '').replace(' ', '')
+            price_text = price_el.get_text().replace("R", "").replace(" ", "")
             try:
                 price_value = int(price_text)
                 price = f"R {price_value:,}".replace(",", " ")
@@ -61,19 +62,20 @@ def fetch_takealot_deals_dom():
         orig_price = orig_el.get_text(strip=True) if orig_el else None
 
         # Product ID
-        pid = card.get('data-product-id') or (href.split('/')[-1] if href else (title or '')[:50])
+        pid = card.get("data-product-id") or (href.split("/")[-1] if href else (title or "")[:50])
 
         if title and price_value is not None:
             deals.append({
-                'product_id': pid,
-                'title': title,
-                'url': url,
-                'price': price,
-                'price_value': price_value,
-                'orig_price': orig_price,
-                'category': 'Other',
-                'image': image
+                "product_id": pid,
+                "title": title,
+                "url": url,
+                "price": price,
+                "price_value": price_value,
+                "orig_price": orig_price,
+                "category": "Other",
+                "image": image
             })
+
     return deals
 
 
@@ -106,18 +108,18 @@ def save_takealot(deals, conn):
     for d in deals:
         cur.execute("""
           INSERT OR IGNORE INTO deals
-            (retailer,product_id,title,url,price,price_value,orig_price,category,image,scraped_date)
-          VALUES (?,?,?,?,?,?,?,?,?,?)
+            (retailer, product_id, title, url, price, price_value, orig_price, category, image, scraped_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             RETAILER,
-            d['product_id'],
-            d['title'],
-            d['url'],
-            d['price'],
-            d['price_value'],
-            d['orig_price'],
-            d['category'],
-            d['image'],
+            d["product_id"],
+            d["title"],
+            d["url"],
+            d["price"],
+            d["price_value"],
+            d["orig_price"],
+            d["category"],
+            d["image"],
             today
         ))
         if cur.rowcount:
@@ -126,13 +128,16 @@ def save_takealot(deals, conn):
     return inserted
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("[INFO] Initializing database…")
     conn = init_db()
+
     print("[INFO] Fetching deals from Takealot via DOM…")
     deals = fetch_takealot_deals_dom()
     print(f"[INFO] Retrieved {len(deals)} deals from Takealot")
+
     print("[INFO] Saving to database…")
     count = save_takealot(deals, conn)
     print(f"[INFO] Inserted {count} new deals (duplicates ignored)")
+
     conn.close()

@@ -5,15 +5,15 @@ on:
     branches:
       - main
   schedule:
-    # Runs at 04:00 UTC every day (06:00 SAST)
+    # Runs at 04:00 UTC (06:00 SAST) every day
     - cron: '0 4 * * *'
 
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      # 1) Check out the repo at full depth so we can push back
-      - name: Checkout code
+      # 1) Check out the full repo history so we can push back
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -25,14 +25,13 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3) Create & activate a virtualenv, then install all requirements (including Playwright)
+      # 3) Create & activate a venv, install all dependencies (including Playwright)
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-          # Now install the browser binaries for Playwright (needed by scraper_loot_dom.py)
           playwright install chromium
 
       # 4) Run the Takealot scraper
@@ -53,27 +52,30 @@ jobs:
           source venv/bin/activate
           python render_deals.py
 
-      # 7) Commit & push only if index.html actually changed 
+      # 7) Commit & push only if index.html actually changed
       - name: Commit & push only if index.html changed
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "actions@github.com"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage only index.html (NEVER deals.db)
+          # Align to remote main to avoid unstaged changes
+          git fetch origin
+          git reset --hard origin/main
+
+          # Stage index.html (never deals.db)
           git add index.html
 
-          # If index.html didn't change, skip push
+          # If nothing changed, skip push
           if git diff --cached --quiet; then
             echo "No changes to commit → skipping push."
             exit 0
           fi
 
-          # Otherwise, commit & rebase on latest main, then push
+          # Otherwise, commit and push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
-          git pull --rebase origin main
           git push origin main
 
-      # 8) Finally, send out the email (always run, even if nothing changed)
+      # 8) Finally, send out the email (always run, even if no new deals)
       - name: Send email alerts
         if: always()
         env:
@@ -81,3 +83,4 @@ jobs:
         run: |
           source venv/bin/activate
           python email_deals.py
+
