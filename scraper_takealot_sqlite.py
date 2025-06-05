@@ -1,5 +1,4 @@
 import sqlite3
-import re
 from datetime import date
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -7,24 +6,22 @@ from playwright.sync_api import sync_playwright
 DB_PATH = "deals.db"
 RETAILER = "takealot"
 
-
 def fetch_takealot_deals_dom():
     """
     Fetch current Takealot deals by parsing the All Deals page DOM.
-    This version simply grabs every <article data-ref="product-card"> on /all-deals.
     """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = browser.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=60000)
 
-        # Wait for any <article data-ref="product-card"> to appear (up to 20s). Otherwise fallback.
+        # Wait for at least one product-card to appear, or fallback after 8s
         try:
             page.wait_for_selector("article[data-ref='product-card']", timeout=20000)
         except:
             page.wait_for_timeout(8000)
 
-        # Scroll a few times to trigger lazy-loading of more deals
+        # Scroll repeatedly to load lazy content
         for _ in range(10):
             page.mouse.wheel(0, 2000)
             page.wait_for_timeout(500)
@@ -35,26 +32,18 @@ def fetch_takealot_deals_dom():
     soup = BeautifulSoup(html, "lxml")
     deals = []
 
-    # Find every article having data-ref="product-card"
-    cards = soup.select("article[data-ref='product-card']")
-    # Debug-print count of cards (optional)
-    print(f"[DEBUG] Found {len(cards)} <article data-ref='product-card'> elements on Takealot all-deals")
-
-    for card in cards:
-        # Title
+    # Each deal is an <article data-ref="product-card">
+    for card in soup.select("article[data-ref='product-card']"):
         title_el = card.select_one("h4[id^='product-card-heading']")
         title = title_el.get_text(strip=True) if title_el else None
 
-        # Link
         link_el = card.select_one("a.product-card-module_link-underlay_3sfaA")
         href = link_el["href"] if link_el and link_el.has_attr("href") else None
         url = f"https://www.takealot.com{href}" if href and href.startswith("/") else href
 
-        # Image
         img_el = card.select_one("img[data-ref='product-image']")
         image = img_el["src"] if img_el and img_el.has_attr("src") else None
 
-        # Current deal price
         price_value = None
         price = None
         price_el = card.select_one("li[data-ref='price'] span.currency")
@@ -66,14 +55,11 @@ def fetch_takealot_deals_dom():
             except ValueError:
                 pass
 
-        # Original list price (if available)
         orig_el = card.select_one("li[data-ref='list-price'] span.currency")
         orig_price = orig_el.get_text(strip=True) if orig_el else None
 
-        # Product ID
         pid = card.get("data-product-id") or (href.split("/")[-1] if href else (title or "")[:50])
 
-        # Only append if we found a title & a valid price_value
         if title and price_value is not None:
             deals.append({
                 "product_id": pid,
@@ -87,7 +73,6 @@ def fetch_takealot_deals_dom():
             })
 
     return deals
-
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -109,7 +94,6 @@ def init_db():
     """)
     conn.commit()
     return conn
-
 
 def save_takealot(deals, conn):
     today = date.today().isoformat()
@@ -136,7 +120,6 @@ def save_takealot(deals, conn):
             inserted += 1
     conn.commit()
     return inserted
-
 
 if __name__ == "__main__":
     print("[INFO] Initializing database…")
