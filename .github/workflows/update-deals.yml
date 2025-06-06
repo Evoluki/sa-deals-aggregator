@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    # Runs at 04:00 UTC every day (~06:00 SAST)
+    # Runs at 04:00 UTC daily (~06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout
+      # 1) Check out the repo
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -27,7 +27,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      # 3) Create venv & install pip packages
+      # 3) Install EXACT OS packages (Ubuntu 24.04) that headless Chromium needs
+      - name: Install system dependencies for Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64
+
+      # 4) Create venv & install Python packages
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
@@ -37,38 +46,37 @@ jobs:
           pip install wheel
           pip install -r requirements.txt
 
-          # Let Playwright install whatever Debian/Ubuntu libraries Chromium needs:
-          playwright install-deps chromium
+          # Let Playwright install its browsers (no install-deps this time)
           playwright install chromium
 
-      # 4) Run Takealot scraper (allow failure so we still collect debug HTML)
+      # 5) Run Takealot scraper (allow failure to collect debug HTML if zero deals)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py || true
           if [ -f takealot_debug.html ]; then
-            echo "→ takealot_debug.html was generated."
+            echo "→ takealot_debug.html generated for investigation"
           fi
 
-      # 5) Run Loot scraper
+      # 6) Run Loot scraper
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) Clean out any deals older than 30 days
+      # 7) Clean out deals older than 30 days
       - name: Clean old deals
         run: |
           source venv/bin/activate
           python cleanup.py
 
-      # 7) Render index.html
+      # 8) Render index.html
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 8) Commit & push index.html if it changed
+      # 9) Commit & push index.html if it changed
       - name: Commit & push changes
         run: |
           git reset --hard HEAD
@@ -87,11 +95,10 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      # 9) If Takealot finds zero deals, upload debug HTML
+      # 10) If Takealot found zero deals (i.e. step 5 exited nonzero), upload debug HTML
       - name: Upload takealot_debug.html (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
           path: takealot_debug.html
-
