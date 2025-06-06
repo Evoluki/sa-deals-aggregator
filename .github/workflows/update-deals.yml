@@ -1,4 +1,4 @@
-# File: .github/workflows/update-deals.yml
+# .github/workflows/update-deals.yml
 name: Daily Deals Update
 
 on:
@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    # Every day at 04:00 UTC (≈ 06:00 SAST)
+    # Runs at 04:00 UTC every day (~06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
@@ -14,27 +14,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Check out your repo
+      # 1) Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Use Python 3.12
+      # 2) Install Python 3.12
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
-      # 3) Install just the packages needed to build lxml
-      - name: Install system dependencies for lxml
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxml2-dev libxslt-dev python3-dev
-
-      # 4) Create a venv & install your pip requirements + Playwright
+      # 3) Create venv & install pip packages
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
@@ -44,48 +37,45 @@ jobs:
           pip install wheel
           pip install -r requirements.txt
 
-          # Let Playwright pull in any remaining Chromium dependencies:
-          playwright install chromium
+          # Let Playwright install whatever Debian/Ubuntu libraries Chromium needs:
           playwright install-deps chromium
+          playwright install chromium
 
-      # 5) Run Takealot scraper
+      # 4) Run Takealot scraper (allow failure so we still collect debug HTML)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py || true
-
-          # If the scraper saw no deals, it will drop takealot_debug.html in workspace:
           if [ -f takealot_debug.html ]; then
-            echo "⚠️  takealot_debug.html is present → download via artifact."
+            echo "→ takealot_debug.html was generated."
           fi
 
-      # 6) Run Loot scraper
+      # 5) Run Loot scraper
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 7) Cleanup old deals (>30 days)
+      # 6) Clean out any deals older than 30 days
       - name: Clean old deals
         run: |
           source venv/bin/activate
           python cleanup.py
 
-      # 8) Render index.html
+      # 7) Render index.html
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 9) Commit & push only if index.html changed
+      # 8) Commit & push index.html if it changed
       - name: Commit & push changes
         run: |
           git reset --hard HEAD
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage index.html (never deals.db)
+          # Stage only index.html (never deals.db)
           git add index.html
 
           if git diff --cached --quiet; then
@@ -97,10 +87,11 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      # 10) If Takealot produced a debug file, upload it
-      - name: Upload takealot_debug.html (if present)
+      # 9) If Takealot finds zero deals, upload debug HTML
+      - name: Upload takealot_debug.html (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
           path: takealot_debug.html
+
