@@ -3,7 +3,6 @@ pandas
 sendgrid
 certifi
 python-dotenv
-playwright==1.44.0
+playwright==1.44.0        # or the latest Playwright you need
 beautifulsoup4==4.12.3
-lxml
-greenlet==3.0.3
+lxml                     # no version pin (or pin a wheel-friendly version like 5.4.0+)
