@@ -11,6 +11,7 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
       # 1) Checkout repository (full history)
       - name: Checkout repository
@@ -91,7 +92,7 @@ jobs:
       # 9) Always upload debug HTML if it exists
       - name: Upload debug HTML
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
           path: takealot_debug.html
