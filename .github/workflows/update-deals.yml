@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    # Runs every day at 04:00 UTC (06:00 SAST)
+    # Run at 04:00 UTC daily (~06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
@@ -14,91 +14,100 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Check out the repository, with full history so we can commit & push
+      # 1) Checkout entire repo (full history)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Set up Python 3.x
-      - name: Set up Python
+      # 2) Use Python 3.12 explicitly
+      - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.12'
 
-      # 3) Create venv & install dependencies
+      # 3) Install system dependencies (so that lxml, Playwright, etc. build properly)
+      - name: Install Ubuntu packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt1-dev python3-dev
+          sudo apt-get install -y \
+            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
+
+      # 4) Create a virtual environment and install Python dependencies
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
 
           pip install --upgrade pip
+          pip install wheel
+
+          # Now install everything from requirements.txt
           pip install -r requirements.txt
 
-          # Install Playwright and its browser binaries
+          # Finally install Playwright browsers + dependencies
           playwright install chromium
           playwright install-deps chromium
 
-      # 4) Run the Takealot scraper (with debug HTML if it finds zero deals)
+      # 5) Run the Takealot scraper (collect debug HTML if zero deals)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py || true
-          
+
           if [ -f takealot_debug.html ]; then
-            echo "⚠️ takealot_debug.html was created—uploading it as an artifact"
+            echo "⚠️  takealot_debug.html exists for inspection."
           else
-            echo "✅ No debug HTML (Takealot found ≥1 deal)."
+            echo "✅  Takealot scraper ran without generating debug HTML."
           fi
 
-      # 5) Run the Loot scraper
+      # 6) Run the Loot scraper
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) Remove deals older than 30 days
+      # 7) Clean up old deals (>30 days)
       - name: Clean old deals
         run: |
           source venv/bin/activate
           python cleanup.py
 
-      # 7) Render index.html from the DB
+      # 8) Render index.html
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 8) Commit & push only if index.html changed
+      # 9) Commit & push index.html (only if it changed)
       - name: Commit & push changes
         run: |
-          # Discard any unintended modifications
           git reset --hard HEAD
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage ONLY index.html (never deals.db)
+          # Stage only index.html (never deals.db)
           git add index.html
 
-          # If index.html didn't change, skip push
           if git diff --cached --quiet; then
             echo "No changes to index.html → skipping push."
             exit 0
           fi
 
-          # Otherwise commit & rebase on origin/main, then push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
 
-      # 9) Always upload takealot_debug.html (if it exists) as an artifact
+      # 10) Upload takealot_debug.html as an artifact if it exists
       - name: Upload debug HTML
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
           path: takealot_debug.html
-
 
