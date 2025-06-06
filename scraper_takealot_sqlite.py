@@ -10,8 +10,9 @@ DB_PATH = "deals.db"
 RETAILER = "takealot"
 DEBUG_HTML_PATH = "takealot_debug.html"
 
+
 def fetch_takealot_deals_dom():
-    """Fetch deals from Takealot’s All Deals page, return a list of deal dicts."""
+    """Fetch current Takealot deals by parsing the All Deals page DOM."""
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
@@ -37,70 +38,72 @@ def fetch_takealot_deals_dom():
         page = context.new_page()
         page.goto("https://www.takealot.com/all-deals", timeout=120000)
 
-        # Try waiting for at least one product card. If timeout, proceed anyway.
+        # Wait up to 30s for any <article data-product-id> to appear
         try:
-            page.wait_for_selector("article[data-ref='product-card']", timeout=30000)
+            page.wait_for_selector("article[data-product-id]", timeout=30000)
         except Exception:
+            # If the above times out, at least wait for DOMContentLoaded
             page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(5000)
 
-        # Scroll down multiple times until no new content appears
+        # Scroll multiple times to load all lazy-loaded content
         last_height = 0
-        scroll_attempts = 0
-        while scroll_attempts < 8:
+        for _ in range(8):
             page.mouse.wheel(0, 5000)
             page.wait_for_timeout(2000)
             new_height = page.evaluate("document.body.scrollHeight")
             if new_height == last_height:
                 break
             last_height = new_height
-            scroll_attempts += 1
 
         html = page.content()
         browser.close()
 
+    # Parse with BeautifulSoup
     soup = BeautifulSoup(html, "lxml")
     deals = []
-    cards = soup.select("article[data-ref='product-card']")
+    cards = soup.select("article[data-product-id]")
     print(f"[DEBUG] Found {len(cards)} candidate cards")
 
     for card in cards:
         try:
-            # Product ID: from data-product-id attribute or fallback
+            # 1) Product ID
             pid = card.get("data-product-id", "").strip()
 
-            # Title
+            # 2) Title
             title_el = card.select_one("h4.product-card-module_product-title_16xh8")
             title = title_el.get_text(strip=True) if title_el else None
 
-            # URL
+            # 3) URL
             link_el = card.select_one("a.product-card-module_link-underlay_3sfaA")
             href = link_el.get("href", "") if link_el else ""
             url = f"https://www.takealot.com{href}" if href.startswith("/") else href
 
-            # Image
+            # 4) Image
             img_el = card.select_one("img[data-ref='product-image']")
             image = img_el.get("src") if img_el else None
 
-            # Current price
+            # 5) Current price
             price_value = None
             price_el = card.select_one("li[data-ref='price'] span.currency")
             if price_el:
-                raw = price_el.get_text(strip=True).replace("R", "").replace(",", "").split()[0]
+                # e.g. "R 3,099" → "3099"
+                price_text = (
+                    price_el.get_text(strip=True)
+                    .replace("R", "")
+                    .replace(",", "")
+                    .split()[0]
+                )
                 try:
-                    price_value = int(raw)
+                    price_value = int(price_text)
                     price = f"R {price_value:,}"
                 except (ValueError, TypeError):
                     price_value = None
-                    price = None
-            else:
-                price = None
 
-            # Original / list price
+            # 6) Original (list) price if present
             orig_el = card.select_one("li[data-ref='list-price'] span.currency")
             orig_price = orig_el.get_text(strip=True) if orig_el else None
 
-            # Only keep valid deals
             if title and price_value is not None:
                 deals.append({
                     "product_id": pid,
@@ -113,10 +116,10 @@ def fetch_takealot_deals_dom():
                     "image": image
                 })
         except Exception as e:
-            print(f"[ERROR] Processing card failed: {e}")
+            print(f"[ERROR] Failed to parse one card: {e}")
             continue
 
-    # If none found, dump HTML for debugging
+    # If zero deals, write a debug HTML for inspection
     if len(deals) == 0:
         print("[WARNING] No deals found! Saving HTML for debugging...")
         with open(DEBUG_HTML_PATH, "w", encoding="utf-8") as f:
@@ -155,8 +158,8 @@ def save_takealot(deals, conn):
     for d in deals:
         cur.execute("""
           INSERT OR IGNORE INTO deals
-            (retailer, product_id, title, url, price, price_value, orig_price, category, image, scraped_date)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (retailer,product_id,title,url,price,price_value,orig_price,category,image,scraped_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (
             RETAILER,
             d["product_id"],

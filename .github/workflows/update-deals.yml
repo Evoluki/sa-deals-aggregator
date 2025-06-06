@@ -1,4 +1,5 @@
 # .github/workflows/update-deals.yml
+
 name: Daily Deals Update
 
 on:
@@ -6,98 +7,106 @@ on:
     branches:
       - main
   schedule:
-    # Runs at 04:00 UTC daily (~06:00 SAST)
+    # Runs daily at 04:00 UTC (06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) Check out the repo
+
+      # 1) Checkout the repository with full history
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Install Python 3.12
+      # 2) Set up Python 3.12
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
-      # 3) Install EXACT OS packages (Ubuntu 24.04) that headless Chromium needs
-      - name: Install system dependencies for Chromium
+      # 3) Install system-level dependencies (including libasound2-dev)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64
+          sudo apt-get install -y libxml2-dev libxslt-dev python3-dev
+          sudo apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+                                  libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+                                  libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+                                  libasound2-dev
 
-      # 4) Create venv & install Python packages
+      # 4) Create a virtualenv and install Python dependencies,
+      #    then install Chromium for playwright
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
-
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install wheel
           pip install -r requirements.txt
-
-          # Let Playwright install its browsers (no install-deps this time)
           playwright install chromium
 
-      # 5) Run Takealot scraper (allow failure to collect debug HTML if zero deals)
+      # 5) Run Takealot scraper (fail if it writes a debug HTML)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
-          python scraper_takealot_sqlite.py || true
+
+          # Run the scraper. If it writes takealot_debug.html, exit with 1 so next step can upload it.
+          python scraper_takealot_sqlite.py
+          EXIT_CODE=$?
+
           if [ -f takealot_debug.html ]; then
-            echo "→ takealot_debug.html generated for investigation"
+            echo "→ takealot_debug.html generated → failing this step so it can be uploaded as artifact"
+            exit 1
           fi
 
-      # 6) Run Loot scraper
+          exit $EXIT_CODE
+
+      # 6) Run Loot scraper (always run, even if Takealot step wrote debug)
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 7) Clean out deals older than 30 days
+      # 7) Clean up old deals from the database (optional; keeps the DB small)
       - name: Clean old deals
         run: |
           source venv/bin/activate
           python cleanup.py
 
-      # 8) Render index.html
+      # 8) Render index.html from the database
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 9) Commit & push index.html if it changed
-      - name: Commit & push changes
+      # 9) Commit & push index.html (only if it changed)
+      - name: Commit & push updated index.html
         run: |
           git reset --hard HEAD
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage only index.html (never deals.db)
+          # Stage only index.html
           git add index.html
 
+          # If no changes to index.html, skip commit/push
           if git diff --cached --quiet; then
             echo "No changes to index.html → skipping push."
             exit 0
           fi
 
+          # Otherwise commit & rebase & push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
 
-      # 10) If Takealot found zero deals (i.e. step 5 exited nonzero), upload debug HTML
-      - name: Upload takealot_debug.html (on failure)
-        if: failure()
+      # 10) Upload takealot_debug.html if it exists (so you can inspect)
+      - name: Upload takealot_debug.html
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
