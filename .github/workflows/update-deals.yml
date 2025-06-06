@@ -26,9 +26,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3) Create venv & install dependencies
+      # 3) Create venv & install dependencies (including system libs for lxml)
       - name: Create venv & install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt1-dev  # <–– Ubuntu needs this for lxml
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
@@ -54,7 +56,7 @@ jobs:
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) (Optional) Clean up old deals from the DB
+      # 6) Clean up old deals from the DB
       - name: Clean old deals
         run: |
           source venv/bin/activate
@@ -78,13 +80,13 @@ jobs:
           # Stage only index.html
           git add index.html
 
-          # If there are no changes, skip push
+          # If no changes, skip push
           if git diff --cached --quiet; then
             echo "No changes to commit → skipping push."
             exit 0
           fi
 
-          # Otherwise commit & rebase on main then push
+          # Otherwise commit & rebase on main and push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
           git push origin main
@@ -96,4 +98,5 @@ jobs:
         with:
           name: takealot-debug
           path: takealot_debug.html
+
 
