@@ -1,5 +1,3 @@
-# ── .github/workflows/update-deals.yml ──
-
 name: Daily Deals Update
 
 on:
@@ -7,84 +5,94 @@ on:
     branches:
       - main
   schedule:
-    # Runs at 04:00 UTC every day (06:00 South African time)
+    # Runs at 04:00 UTC every day (06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) Check out your repo (full history, so we can commit later)
+      # 1) Checkout repository (full history)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Set up Python 3.x
+      # 2) Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      # 3) Create & activate a virtualenv, install dependencies, and install Playwright’s browser
-      - name: Create & activate virtualenv, install deps, install Playwright
+      # 3) Create venv & install dependencies
+      - name: Create venv & install dependencies
         run: |
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
           playwright install chromium
+          playwright install-deps chromium
 
-      # 4) Run the Takealot scraper (the new scraper_takealot_sqlite.py)
+      # 4) Run Takealot scraper (with debug HTML upload if no deals)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
-          python scraper_takealot_sqlite.py
+          python scraper_takealot_sqlite.py || true
+          if [ -f takealot_debug.html ]; then
+            echo "----- takealot_debug.html exists -----"
+            ls -lh takealot_debug.html
+          else
+            echo "No debug HTML"
+          fi
 
-      # 5) Run your Loot scraper as you already have it
+      # 5) Run Loot scraper
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) Render the static HTML from deals.db
+      # 6) (Optional) Clean up old deals from the DB
+      - name: Clean old deals
+        run: |
+          source venv/bin/activate
+          python cleanup.py
+
+      # 7) Render index.html from DB
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 7) Commit & push index.html if it changed
-      - name: Commit & push only if index.html changed
+      # 8) Commit & push only if index.html changed
+      - name: Commit & push changes
         run: |
-          # Reset any unintended modifications to tracked files
-          git fetch origin
-          git reset --hard origin/main
+          # Discard any unintended modifications
+          git reset --hard HEAD
 
-          # Configure Git for the bot
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage only index.html (never deals.db)
+          # Stage only index.html
           git add index.html
 
-          # If index.html is unchanged, skip pushing
+          # If there are no changes, skip push
           if git diff --cached --quiet; then
-            echo "No changes to index.html → skipping push."
+            echo "No changes to commit → skipping push."
             exit 0
           fi
 
-          # Otherwise commit & push
+          # Otherwise commit & rebase on main then push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git pull --rebase origin main
           git push origin main
 
-      # 8) Send out the email alert (runs even if nothing changed)
-      - name: Send email alerts
+      # 9) Always upload debug HTML if it exists
+      - name: Upload debug HTML
         if: always()
-        env:
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-        run: |
-          source venv/bin/activate
-          python email_deals.py
+        uses: actions/upload-artifact@v3
+        with:
+          name: takealot-debug
+          path: takealot_debug.html
 
