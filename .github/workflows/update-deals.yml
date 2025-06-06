@@ -1,3 +1,5 @@
+# ── .github/workflows/update-deals.yml ──
+
 name: Daily Deals Update
 
 on:
@@ -5,14 +7,15 @@ on:
     branches:
       - main
   schedule:
-    # Runs at 04:00 UTC (06:00 SAST) every day
+    # Runs at 04:00 UTC every day (06:00 South African time)
     - cron: '0 4 * * *'
 
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
-      # 1) Checkout full history so we can push back
+      # 1) Check out your repo (full history, so we can commit later)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -25,8 +28,8 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3) Create venv & install dependencies (including Playwright)
-      - name: Create venv & install dependencies
+      # 3) Create & activate a virtualenv, install dependencies, and install Playwright’s browser
+      - name: Create & activate virtualenv, install deps, install Playwright
         run: |
           python -m venv venv
           source venv/bin/activate
@@ -34,48 +37,49 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium
 
-      # 4) Run the Takealot scraper
+      # 4) Run the Takealot scraper (the new scraper_takealot_sqlite.py)
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py
 
-      # 5) Run the Loot scraper
+      # 5) Run your Loot scraper as you already have it
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 6) Render the combined deals page (and print count)
-      - name: Render HTML (and debug count)
+      # 6) Render the static HTML from deals.db
+      - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 7) Commit & push index.html ONLY (reset to avoid unstaged changes)
+      # 7) Commit & push index.html if it changed
       - name: Commit & push only if index.html changed
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Hard reset to remote main to clear any local artifacts
+          # Reset any unintended modifications to tracked files
           git fetch origin
           git reset --hard origin/main
 
-          # Stage index.html (never deals.db)
+          # Configure Git for the bot
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage only index.html (never deals.db)
           git add index.html
 
-          # If index.html didn’t change, skip push
+          # If index.html is unchanged, skip pushing
           if git diff --cached --quiet; then
             echo "No changes to index.html → skipping push."
             exit 0
           fi
 
-          # Otherwise, commit & push
+          # Otherwise commit & push
           git commit -m "Automated daily update: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push origin main
 
-      # 8) Send email alerts (always run, even if no new deals)
+      # 8) Send out the email alert (runs even if nothing changed)
       - name: Send email alerts
         if: always()
         env:
