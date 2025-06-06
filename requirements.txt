@@ -3,7 +3,7 @@ pandas
 sendgrid
 certifi
 python-dotenv
-playwright==1.44.0         # Newer Playwright with explicit Python 3.12 support
+playwright==1.44.0
 beautifulsoup4==4.12.3
 lxml
-greenlet==3.0.3            # Pin greenlet 3.0.3 (builds on Python 3.12)
+greenlet==3.0.3

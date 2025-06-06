@@ -6,7 +6,7 @@ on:
     branches:
       - main
   schedule:
-    # Run at 04:00 UTC daily (~06:00 SAST)
+    # Every day at 04:00 UTC (≈06:00 SAST)
     - cron: '0 4 * * *'
 
 jobs:
@@ -14,30 +14,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout entire repo (full history)
+      ### 1) Check out the repository ###
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # 2) Use Python 3.12 explicitly
-      - name: Set up Python 3.12
+      ### 2) Set up Python 3.12 ###
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
-      # 3) Install system dependencies (so that lxml, Playwright, etc. build properly)
-      - name: Install Ubuntu packages
+      ### 3) Install just the libraries needed to build lxml ###
+      - name: Install system packages for lxml
         run: |
           sudo apt-get update
           sudo apt-get install -y libxml2-dev libxslt1-dev python3-dev
-          sudo apt-get install -y \
-            libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
 
-      # 4) Create a virtual environment and install Python dependencies
+      ### 4) Create & activate a venv, install Python deps ###
       - name: Create venv & install dependencies
         run: |
           python -m venv venv
@@ -45,45 +41,43 @@ jobs:
 
           pip install --upgrade pip
           pip install wheel
-
-          # Now install everything from requirements.txt
           pip install -r requirements.txt
 
-          # Finally install Playwright browsers + dependencies
+          # Now pull in Playwright’s own runtime dependencies (Chromium + Linux libs)
           playwright install chromium
           playwright install-deps chromium
 
-      # 5) Run the Takealot scraper (collect debug HTML if zero deals)
+      ### 5) Run the Takealot scraper, save debug HTML if zero deals ###
       - name: Run Takealot scraper
         run: |
           source venv/bin/activate
           python scraper_takealot_sqlite.py || true
 
           if [ -f takealot_debug.html ]; then
-            echo "⚠️  takealot_debug.html exists for inspection."
+            echo "⚠️  takealot_debug.html was generated (use artifact to debug)."
           else
-            echo "✅  Takealot scraper ran without generating debug HTML."
+            echo "✅  No takealot_debug.html (Takealot scraper likely succeeded)."
           fi
 
-      # 6) Run the Loot scraper
+      ### 6) Run the Loot scraper ###
       - name: Run Loot scraper
         run: |
           source venv/bin/activate
           python scraper_loot_dom.py
 
-      # 7) Clean up old deals (>30 days)
+      ### 7) Clean up >30‐day‐old deals ###
       - name: Clean old deals
         run: |
           source venv/bin/activate
           python cleanup.py
 
-      # 8) Render index.html
+      ### 8) Render index.html ###
       - name: Render HTML
         run: |
           source venv/bin/activate
           python render_deals.py
 
-      # 9) Commit & push index.html (only if it changed)
+      ### 9) Commit & push index.html only if it changed ###
       - name: Commit & push changes
         run: |
           git reset --hard HEAD
@@ -103,11 +97,12 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      # 10) Upload takealot_debug.html as an artifact if it exists
+      ### 10) Upload takealot_debug.html (so you can inspect it if needed) ###
       - name: Upload debug HTML
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: takealot-debug
           path: takealot_debug.html
+
 
