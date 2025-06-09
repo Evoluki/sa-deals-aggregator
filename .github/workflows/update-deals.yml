@@ -49,21 +49,11 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium
 
-      # 5) Run Takealot scraper (fail if it writes a debug HTML)
-      - name: Run Takealot scraper
-        run: |
-          source venv/bin/activate
+      # - name: Run Takealot scraper
+#   run: |
+#     source venv/bin/activate
+#     python scraper_takealot_sqlite.py
 
-          # Run the scraper. If it writes takealot_debug.html, exit with 1 so next step can upload it.
-          python scraper_takealot_sqlite.py
-          EXIT_CODE=$?
-
-          if [ -f takealot_debug.html ]; then
-            echo "→ takealot_debug.html generated → failing this step so it can be uploaded as artifact"
-            exit 1
-          fi
-
-          exit $EXIT_CODE
 
       # 6) Run Loot scraper (always run, even if Takealot step wrote debug)
       - name: Run Loot scraper
